@@ -2,6 +2,9 @@
 
 An unofficial, community-developed Chrome extension to monitor and debug PostHog events in real-time.
 
+<img width="601" height="602" alt="image" src="https://github.com/user-attachments/assets/bb8f077c-983d-411f-8c3e-a78818c6e22f" />
+
+
 ## Installation
 
 1. Install dependencies:
