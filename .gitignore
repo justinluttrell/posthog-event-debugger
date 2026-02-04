@@ -14,3 +14,6 @@ bun-debug.log*
 
 # Environment variables
 .env
+
+# macOS
+.DS_Store
