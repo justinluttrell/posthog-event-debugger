@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PostHog Event Debugger</title>
+    <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+    <div class="container">
+        <!-- Main View -->
+        <div id="mainView">
+            <div class="header">
+                <h1>PostHog Event Debugger</h1>
+                <div class="header-buttons">
+                    <button id="clearBtn" class="clear-btn">Clear All</button>
+                    <button id="configBtn" class="configure-btn" title="Configure filters">Settings</button>
+                </div>
+            </div>
+
+            <div class="search-bar">
+                <input type="text" id="searchInput" placeholder="Search events and properties..." />
+                <button id="clearSearchBtn" class="clear-search-btn" title="Clear search">×</button>
+            </div>
+
+            <div id="domainTabs" class="domain-tabs" style="display: none;">
+                <!-- Populated by JavaScript -->
+            </div>
+
+            <div id="eventsList" class="events-list">
+                <div class="empty-state">
+                    <p>No events captured yet</p>
+                    <p class="hint">Events will appear here when PostHog sends data</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Settings View -->
+        <div id="settingsView" style="display: none;">
+            <div class="header">
+                <button id="backBtn" class="back-btn">← Back</button>
+                <h1>Filter Events</h1>
+            </div>
+
+            <div class="settings-content">
+                <div class="settings-section">
+                    <div class="settings-header">
+                        <h3>Event Types</h3>
+                        <div class="settings-actions">
+                            <button id="selectAllBtn" class="action-btn">Select All</button>
+                            <button id="deselectAllBtn" class="action-btn">Deselect All</button>
+                        </div>
+                    </div>
+                    <div id="eventTypeFilters" class="event-filters">
+                        <!-- Populated by JavaScript -->
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script type="module" src="popup.js"></script>
+</body>
+</html>

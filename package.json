@@ -1,0 +1,26 @@
+{
+  "name": "posthog-event-debugger",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Unofficial Chrome extension to debug PostHog events",
+  "author": "https://github.com/justinluttrell",
+  "scripts": {
+    "build": "bun build:ts && bun build:assets",
+    "build:ts": "bun build src/{background,popup,content,injected}.ts --outdir dist --target browser",
+    "build:assets": "cp src/*.html dist/ && cp src/*.css dist/ && cp manifest.json dist/ && cp -r icons dist/",
+    "dev": "bunx chokidar-cli 'src/**/*.{ts,html,css}' 'manifest.json' 'icons/**/*' -c 'bun run build' --initial",
+    "lint": "eslint src/**/*.ts",
+    "lint:fix": "eslint src/**/*.ts --fix"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.0.268",
+    "@types/pako": "^2.0.4",
+    "@typescript-eslint/eslint-plugin": "^8.54.0",
+    "@typescript-eslint/parser": "^8.54.0",
+    "bun-types": "latest",
+    "eslint-config-prettier": "^10.1.8"
+  },
+  "dependencies": {
+    "pako": "^2.1.0"
+  }
+}
