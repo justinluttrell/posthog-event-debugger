@@ -1,5 +1,5 @@
 import type { PostHogEvent } from './types';
-import { FILTERABLE_EVENT_TYPES, getEventDisplayName, isFilterableEventType, eventToDescription } from './utils';
+import { EVENT_TYPE_CONFIG, FILTERABLE_EVENT_TYPES, getEventDisplayName, isFilterableEventType, eventToDescription } from './utils';
 
 // State
 const expandedEvents = new Set<string>();
@@ -58,14 +58,19 @@ async function clearEvents(): Promise<void> {
 }
 
 // Utility functions
-function filterProperties(properties: Record<string, any>, eventId: string): Record<string, any> {
+function filterProperties(
+  properties: Record<string, any>,
+  eventId: string,
+  eventName: string
+): Record<string, any> {
   const showInternal = showInternalPropsForEvent.get(eventId) || false;
   if (showInternal) {
     return properties;
   }
+  const alwaysShow = EVENT_TYPE_CONFIG[eventName]?.alwaysShowProperties ?? [];
   const filtered: Record<string, any> = {};
   for (const [key, value] of Object.entries(properties)) {
-    if (!key.startsWith('$')) {
+    if (!key.startsWith('$') || alwaysShow.includes(key)) {
       filtered[key] = value;
     }
   }
@@ -125,7 +130,7 @@ function renderEvent(event: PostHogEvent): string {
   const displayName = getEventDisplayName(eventName);
   const description = eventToDescription(decoded, true);
   const properties = decoded.properties || {};
-  const filteredProps = filterProperties(properties, event.id);
+  const filteredProps = filterProperties(properties, event.id, eventName);
   const hasProps = Object.keys(filteredProps).length > 0;
   const showInternal = showInternalPropsForEvent.get(event.id) ?? false;
   const isExpanded = expandedEvents.has(event.id);
@@ -284,9 +289,16 @@ async function getCurrentTabDomain(): Promise<string | null> {
   return null;
 }
 
-async function renderEvents(): Promise<void> {
+type ScrollMode = 'adjust' | 'keep';
+
+async function renderEvents(scrollMode: ScrollMode = 'adjust'): Promise<void> {
   const eventsList = document.getElementById('eventsList');
   if (!eventsList) return;
+  
+  const prevScrollTop = eventsList.scrollTop;
+  const prevScrollHeight = eventsList.scrollHeight;
+  const preserveScroll = prevScrollTop > 0;
+  const shouldAdjustScroll = scrollMode === 'adjust' && preserveScroll;
   
   const allEvents = await getEvents();
   
@@ -326,10 +338,23 @@ async function renderEvents(): Promise<void> {
         <p class="hint">${hasSearch ? 'Try a different search term' : hasEvents ? 'Adjust filters in settings to see events' : 'Events will appear here when PostHog sends data'}</p>
       </div>
     `;
+    if (shouldAdjustScroll) {
+      const newScrollHeight = eventsList.scrollHeight;
+      eventsList.scrollTop = prevScrollTop + (newScrollHeight - prevScrollHeight);
+    } else if (scrollMode === 'keep') {
+      eventsList.scrollTop = prevScrollTop;
+    }
     return;
   }
   
   eventsList.innerHTML = events.map(renderEvent).join('');
+  
+  if (shouldAdjustScroll) {
+    const newScrollHeight = eventsList.scrollHeight;
+    eventsList.scrollTop = prevScrollTop + (newScrollHeight - prevScrollHeight);
+  } else if (scrollMode === 'keep') {
+    eventsList.scrollTop = prevScrollTop;
+  }
   
   eventsList.querySelectorAll('.event-header').forEach((header) => {
     header.addEventListener('click', () => {
@@ -357,7 +382,7 @@ async function renderEvents(): Promise<void> {
       if (eventId) {
         const isChecked = target.checked;
         showInternalPropsForEvent.set(eventId, isChecked);
-        await renderEvents();
+        await renderEvents('keep');
       }
     });
   });
@@ -381,7 +406,7 @@ function showMain(): void {
 async function renderSettings(): Promise<void> {
   const filterList = document.getElementById('eventTypeFilters');
   if (!filterList) return;
-  
+
   const allEvents = await getEvents();
   
   // Filter by selected domain if one is selected
@@ -483,7 +508,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   backBtn?.addEventListener('click', () => {
     showMain();
   });
-  
+
   const selectAllBtn = document.getElementById('selectAllBtn');
   selectAllBtn?.addEventListener('click', async () => {
     filteredEventTypes.clear();

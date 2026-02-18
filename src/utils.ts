@@ -91,9 +91,35 @@ export function eventToDescription(
     return autoCaptureEventToDescription(event, shortForm);
   }
 
+  // Feature Flag events - show name and value in unexpanded view
+  const config = EVENT_TYPE_CONFIG[event.event];
+  if (config?.descriptionKeys?.length) {
+    const parts = config.descriptionKeys
+      .map((key) => event.properties?.[key])
+      .filter((v) => v != null && v !== '');
+    if (parts.length > 0) {
+      return parts.map((v) => (typeof v === 'string' ? `"${v}"` : String(v))).join(' → ');
+    }
+  }
+
   // All other events
   return event.event;
 }
+
+// Per-event-type config for custom display behavior (description, whitelisted properties)
+export interface EventTypeConfig {
+  /** Property keys used to build unexpanded description (e.g. feature flag name + value) */
+  descriptionKeys?: string[];
+  /** Property keys always shown in expanded view (no "Show PostHog Properties" needed) */
+  alwaysShowProperties?: string[];
+}
+
+export const EVENT_TYPE_CONFIG: Partial<Record<string, EventTypeConfig>> = {
+  $feature_flag_called: {
+    descriptionKeys: ['$feature_flag', '$feature_flag_response'],
+    alwaysShowProperties: ['$feature_flag', '$feature_flag_response', '$feature_flag_payload'],
+  },
+};
 
 // Common PostHog internal events that can be filtered
 export const FILTERABLE_EVENT_TYPES: Record<string, string> = {
