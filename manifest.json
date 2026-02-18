@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "PostHog Event Debugger (Unofficial)",
   "version": "1.0.0",
-  "description": "Unofficial community-developed extension to monitor and debug PostHog events in real-time",
+  "description": "Unofficial extension to monitor and debug PostHog events in real-time.",
   "permissions": [
     "storage",
     "tabs"
