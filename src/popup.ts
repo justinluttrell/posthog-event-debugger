@@ -4,6 +4,7 @@ import { EVENT_TYPE_CONFIG, FILTERABLE_EVENT_TYPES, getEventDisplayName, isFilte
 // State
 const expandedEvents = new Set<string>();
 const showInternalPropsForEvent = new Map<string, boolean>();
+const expandedJsonValues = new Set<string>();
 let filteredEventTypes = new Set<string>();
 let searchQuery = '';
 let selectedDomain: string | null = null; // null means "all domains"
@@ -85,12 +86,40 @@ function getValueClass(value: any): string {
   return '';
 }
 
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 function formatValue(value: any): string {
   if (value === null) return 'null';
   if (value === undefined) return 'undefined';
   if (typeof value === 'string') return `"${value}"`;
   if (typeof value === 'object') return JSON.stringify(value);
   return String(value);
+}
+
+function renderPropertyValueHtml(value: any, eventId: string, propertyKey: string): string {
+  const valueClass = getValueClass(value);
+  if (value && typeof value === 'object') {
+    const expansionKey = `${eventId}::${propertyKey}`;
+    const isExpanded = expandedJsonValues.has(expansionKey);
+    const collapsed = JSON.stringify(value);
+    const expanded = JSON.stringify(value, null, 2);
+    return `
+      <div
+        class="property-value ${valueClass} json-toggle ${isExpanded ? 'expanded' : ''}"
+        data-expansion-key="${escapeHtml(expansionKey)}"
+        data-collapsed="${escapeHtml(collapsed)}"
+        data-full="${escapeHtml(expanded)}"
+      >${escapeHtml(isExpanded ? expanded : collapsed)}</div>
+    `;
+  }
+  return `<div class="property-value ${valueClass}">${escapeHtml(formatValue(value))}</div>`;
 }
 
 function renderEvent(event: PostHogEvent): string {
@@ -142,7 +171,7 @@ function renderEvent(event: PostHogEvent): string {
           ([key, value]) => `
       <div class="property-row">
         <div class="property-key">${key}</div>
-        <div class="property-value ${getValueClass(value)}">${formatValue(value)}</div>
+        ${renderPropertyValueHtml(value, event.id, key)}
       </div>
     `
         )
@@ -383,6 +412,25 @@ async function renderEvents(scrollMode: ScrollMode = 'adjust'): Promise<void> {
         const isChecked = target.checked;
         showInternalPropsForEvent.set(eventId, isChecked);
         await renderEvents('keep');
+      }
+    });
+  });
+
+  eventsList.querySelectorAll('.property-value.json-toggle').forEach((valueEl) => {
+    valueEl.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const target = e.currentTarget as HTMLElement;
+      const expansionKey = target.dataset.expansionKey ?? '';
+      const isExpanded = target.classList.toggle('expanded');
+      const expanded = target.dataset.full ?? '';
+      const collapsed = target.dataset.collapsed ?? '';
+      target.textContent = isExpanded ? expanded : collapsed;
+      if (expansionKey) {
+        if (isExpanded) {
+          expandedJsonValues.add(expansionKey);
+        } else {
+          expandedJsonValues.delete(expansionKey);
+        }
       }
     });
   });

@@ -386,6 +386,8 @@ body {
     word-break: break-word;
     font-family: 'Monaco', 'Courier New', monospace;
     font-size: 11px;
+    flex: 1;
+    min-width: 0;
 }
 
 .property-value.string {
@@ -407,6 +409,32 @@ body {
 
 .property-value.object {
     color: var(--warning-orange);
+}
+
+.property-value.json-toggle {
+    cursor: pointer;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    transition: color 0.15s ease;
+    padding: 2px 6px;
+    border-radius: 6px;
+    border: 1px solid transparent;
+    background: rgba(59, 130, 246, 0.08);
+}
+
+.property-value.json-toggle:hover {
+    border-color: rgba(59, 130, 246, 0.5);
+    background: rgba(59, 130, 246, 0.16);
+}
+
+.property-value.json-toggle.expanded {
+    white-space: pre-wrap;
+    overflow: visible;
+    text-overflow: clip;
+    background: rgba(59, 130, 246, 0.12);
+    border-color: rgba(59, 130, 246, 0.5);
+    text-decoration: none;
 }
 
 /* Error state with hand-drawn feel */
