@@ -30,7 +30,7 @@
 }
 
 body {
-    width: 800px;
+    width: 752px;
     max-height: 600px;
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
     background: var(--bg-secondary);
@@ -232,6 +232,23 @@ body {
 .empty-state .hint {
     font-size: 13px;
     color: var(--text-tertiary);
+}
+
+.refresh-tab-btn {
+    margin-top: 12px;
+    background: var(--bg-primary);
+    border: 2px solid var(--text-primary);
+    padding: 8px 12px;
+    border-radius: 8px;
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+    box-shadow: 2px 2px 0 var(--text-primary);
+}
+
+.refresh-tab-btn:active {
+    transform: translate(2px, 2px);
+    box-shadow: 0 0 0 var(--text-primary);
 }
 
 /* Event item with hand-drawn card style */

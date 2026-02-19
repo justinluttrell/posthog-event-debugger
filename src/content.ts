@@ -38,3 +38,13 @@ window.addEventListener('posthog-debugger-event', ((event: CustomEvent) => {
       console.error('[PostHog Debugger] Error forwarding to background:', error);
   });
 }) as EventListener);
+
+// Relay popup commands to the page context and provide a health ping.
+chrome.runtime.onMessage.addListener((request: any, sender, sendResponse) => {
+  if (request.action === 'pingContentScript') {
+    sendResponse({ loaded: true });
+    return true;
+  }
+
+  return false;
+});

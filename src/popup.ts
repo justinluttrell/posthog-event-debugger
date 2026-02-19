@@ -234,12 +234,68 @@ function getUniqueDomains(events: PostHogEvent[]): string[] {
   return Array.from(domains).sort();
 }
 
-async function renderDomainTabs(domains: string[], allEvents: PostHogEvent[]): Promise<void> {
+interface ActiveTabCaptureStatus {
+  tabId: number | null;
+  domain: string | null;
+  isHttpPage: boolean;
+  contentScriptLoaded: boolean;
+}
+
+async function isContentScriptLoaded(tabId: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    try {
+      chrome.tabs.sendMessage(tabId, { action: 'pingContentScript' }, (response) => {
+        if (chrome.runtime.lastError) {
+          resolve(false);
+          return;
+        }
+        resolve(Boolean(response?.loaded));
+      });
+    } catch {
+      resolve(false);
+    }
+  });
+}
+
+async function getActiveTabCaptureStatus(): Promise<ActiveTabCaptureStatus> {
+  try {
+    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+    const tab = tabs[0];
+    if (!tab?.id) {
+      return { tabId: null, domain: null, isHttpPage: false, contentScriptLoaded: false };
+    }
+
+    let domain: string | null = null;
+    let isHttpPage = false;
+    if (tab.url) {
+      try {
+        const urlObj = new URL(tab.url);
+        domain = urlObj.hostname;
+        isHttpPage = urlObj.protocol === 'http:' || urlObj.protocol === 'https:';
+      } catch {
+        domain = null;
+      }
+    }
+
+    const contentScriptLoaded = isHttpPage ? await isContentScriptLoaded(tab.id) : false;
+    return { tabId: tab.id, domain, isHttpPage, contentScriptLoaded };
+  } catch {
+    return { tabId: null, domain: null, isHttpPage: false, contentScriptLoaded: false };
+  }
+}
+
+async function renderDomainTabs(domains: string[], allEvents: PostHogEvent[], currentDomain: string | null): Promise<void> {
   const domainTabs = document.getElementById('domainTabs');
   if (!domainTabs) return;
+
+  const displayDomains = [...domains];
+  if (currentDomain && !displayDomains.includes(currentDomain)) {
+    displayDomains.push(currentDomain);
+    displayDomains.sort();
+  }
   
-  // Only show tabs if there are multiple domains
-  if (domains.length <= 1) {
+  // Show tabs for multiple domains, or when current tab has no captured events yet.
+  if (displayDomains.length <= 1 && !(currentDomain && allEvents.length === 0)) {
     domainTabs.style.display = 'none';
     selectedDomain = null; // Reset to show all when only one domain
     return;
@@ -249,13 +305,11 @@ async function renderDomainTabs(domains: string[], allEvents: PostHogEvent[]): P
   
   // Only auto-select if we haven't done it yet and no domain is explicitly selected
   // This prevents re-selecting when user clicks "All"
-  if (!domainAutoSelected && selectedDomain === null && domains.length > 0) {
-    // Try to get current tab's domain and select it, otherwise select first domain
-    const currentDomain = await getCurrentTabDomain();
-    if (currentDomain && domains.includes(currentDomain)) {
+  if (!domainAutoSelected && selectedDomain === null && displayDomains.length > 0) {
+    if (currentDomain && displayDomains.includes(currentDomain)) {
       selectedDomain = currentDomain;
-    } else if (domains.length > 0) {
-      selectedDomain = domains[0];
+    } else if (displayDomains.length > 0) {
+      selectedDomain = displayDomains[0];
     }
     domainAutoSelected = true;
   }
@@ -272,7 +326,7 @@ async function renderDomainTabs(domains: string[], allEvents: PostHogEvent[]): P
     <button class="domain-tab ${selectedDomain === null ? 'active' : ''}" data-domain="all">
       All (${allEvents.length})
     </button>
-    ${domains
+    ${displayDomains
       .map(
         (domain) => `
       <button class="domain-tab ${selectedDomain === domain ? 'active' : ''}" data-domain="${domain}">
@@ -300,91 +354,107 @@ async function renderDomainTabs(domains: string[], allEvents: PostHogEvent[]): P
   });
 }
 
-// Get the current active tab's domain
-async function getCurrentTabDomain(): Promise<string | null> {
-  try {
-    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (tabs[0]?.url) {
-      try {
-        const urlObj = new URL(tabs[0].url);
-        return urlObj.hostname;
-      } catch {
-        return null;
-      }
-    }
-  } catch {
-    // Ignore errors
-  }
-  return null;
-}
-
 type ScrollMode = 'adjust' | 'keep';
 
-async function renderEvents(scrollMode: ScrollMode = 'adjust'): Promise<void> {
-  const eventsList = document.getElementById('eventsList');
-  if (!eventsList) return;
-  
-  const prevScrollTop = eventsList.scrollTop;
-  const prevScrollHeight = eventsList.scrollHeight;
-  const preserveScroll = prevScrollTop > 0;
-  const shouldAdjustScroll = scrollMode === 'adjust' && preserveScroll;
-  
-  const allEvents = await getEvents();
-  
-  // Get unique domains and render tabs
-  const domains = getUniqueDomains(allEvents);
-  await renderDomainTabs(domains, allEvents);
-  
-  // Filter events by domain, event type, and search
-  const events = allEvents.filter((event) => {
-    // Filter by domain
+interface EmptyStateData {
+  title: string;
+  hint: string;
+  showRefreshPrompt: boolean;
+}
+
+function filterEventsForDisplay(allEvents: PostHogEvent[]): PostHogEvent[] {
+  return allEvents.filter((event) => {
     if (selectedDomain !== null && event.domain !== selectedDomain) {
       return false;
     }
-    
-    // Filter by event type
+
     if (event.decoded) {
       const eventName = event.decoded.event || 'Unknown Event';
       if (isFilterableEventType(eventName) && filteredEventTypes.has(eventName)) {
         return false;
       }
     }
-    
-    // Filter by search
+
     if (!matchesSearch(event, searchQuery)) {
       return false;
     }
-    
+
     return true;
   });
-  
-  if (events.length === 0) {
-    const hasEvents = allEvents.length > 0;
-    const hasSearch = searchQuery.length > 0;
-    eventsList.innerHTML = `
-      <div class="empty-state">
-        <p>${hasSearch ? 'No events match your search' : hasEvents ? 'All events are filtered out' : 'No events captured yet'}</p>
-        <p class="hint">${hasSearch ? 'Try a different search term' : hasEvents ? 'Adjust filters in settings to see events' : 'Events will appear here when PostHog sends data'}</p>
-      </div>
-    `;
-    if (shouldAdjustScroll) {
-      const newScrollHeight = eventsList.scrollHeight;
-      eventsList.scrollTop = prevScrollTop + (newScrollHeight - prevScrollHeight);
-    } else if (scrollMode === 'keep') {
-      eventsList.scrollTop = prevScrollTop;
-    }
-    return;
+}
+
+function getDomainScopedEvents(allEvents: PostHogEvent[]): PostHogEvent[] {
+  return allEvents.filter((event) => selectedDomain === null || event.domain === selectedDomain);
+}
+
+function buildEmptyState(
+  allEvents: PostHogEvent[],
+  domainScopedEvents: PostHogEvent[],
+  activeTabStatus: ActiveTabCaptureStatus
+): EmptyStateData {
+  const hasEvents = allEvents.length > 0;
+  const hasEventsInSelectedDomain = domainScopedEvents.length > 0;
+  const hasSearch = searchQuery.length > 0;
+  const isActiveDomainSelected = selectedDomain === null || selectedDomain === activeTabStatus.domain;
+
+  const showRefreshPrompt =
+    !hasSearch &&
+    !hasEventsInSelectedDomain &&
+    isActiveDomainSelected &&
+    activeTabStatus.isHttpPage &&
+    !activeTabStatus.contentScriptLoaded;
+  const isUnsupportedPage =
+    !hasSearch &&
+    !hasEventsInSelectedDomain &&
+    isActiveDomainSelected &&
+    !activeTabStatus.isHttpPage;
+
+  let title = 'No events captured yet';
+  let hint = 'Events will appear here when captured.';
+
+  if (hasSearch) {
+    title = 'No events match your search';
+    hint = 'Try a different search term.';
+  } else if (hasEventsInSelectedDomain) {
+    title = 'All events are filtered out';
+    hint = 'Adjust filters in settings to see events.';
+  } else if (isUnsupportedPage) {
+    title = 'Events cannot be tracked on this page';
+    hint = 'Open a regular http(s) page to capture PostHog events.';
+  } else if (showRefreshPrompt) {
+    title = `Refresh to view captured events for ${activeTabStatus.domain || 'this tab'}`;
+    hint = 'This page loaded before the extension started tracking events.';
+  } else if (hasEvents) {
+    title = 'No events captured for this domain';
+    hint = isActiveDomainSelected
+      ? 'No PostHog events seen on this page yet. Verify PostHog is installed and trigger an event.'
+      : 'Switch domains to view captured events from other pages.';
   }
-  
-  eventsList.innerHTML = events.map(renderEvent).join('');
-  
+
+  return { title, hint, showRefreshPrompt };
+}
+
+function restoreEventsListScroll(
+  eventsList: HTMLElement,
+  scrollMode: ScrollMode,
+  prevScrollTop: number,
+  prevScrollHeight: number
+): void {
+  const preserveScroll = prevScrollTop > 0;
+  const shouldAdjustScroll = scrollMode === 'adjust' && preserveScroll;
+
   if (shouldAdjustScroll) {
     const newScrollHeight = eventsList.scrollHeight;
     eventsList.scrollTop = prevScrollTop + (newScrollHeight - prevScrollHeight);
-  } else if (scrollMode === 'keep') {
+    return;
+  }
+
+  if (scrollMode === 'keep') {
     eventsList.scrollTop = prevScrollTop;
   }
-  
+}
+
+function bindEventListHandlers(eventsList: HTMLElement): void {
   eventsList.querySelectorAll('.event-header').forEach((header) => {
     header.addEventListener('click', () => {
       const eventItem = header.closest('.event-item');
@@ -399,7 +469,7 @@ async function renderEvents(scrollMode: ScrollMode = 'adjust'): Promise<void> {
       }
     });
   });
-  
+
   eventsList.querySelectorAll('.show-internal-props').forEach((checkbox) => {
     checkbox.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -434,6 +504,49 @@ async function renderEvents(scrollMode: ScrollMode = 'adjust'): Promise<void> {
       }
     });
   });
+}
+
+async function renderEvents(scrollMode: ScrollMode = 'adjust'): Promise<void> {
+  const eventsList = document.getElementById('eventsList');
+  if (!eventsList) return;
+  
+  const prevScrollTop = eventsList.scrollTop;
+  const prevScrollHeight = eventsList.scrollHeight;
+  
+  const allEvents = await getEvents();
+  const activeTabStatus = await getActiveTabCaptureStatus();
+  
+  // Get unique domains and render tabs
+  const domains = getUniqueDomains(allEvents);
+  await renderDomainTabs(domains, allEvents, activeTabStatus.domain);
+  
+  const events = filterEventsForDisplay(allEvents);
+  const domainScopedEvents = getDomainScopedEvents(allEvents);
+  
+  if (events.length === 0) {
+    const emptyState = buildEmptyState(allEvents, domainScopedEvents, activeTabStatus);
+    eventsList.innerHTML = `
+      <div class="empty-state">
+        <p>${emptyState.title}</p>
+        <p class="hint">${emptyState.hint}</p>
+        ${emptyState.showRefreshPrompt ? '<button id="refreshTabBtn" class="refresh-tab-btn">Refresh Tab</button>' : ''}
+      </div>
+    `;
+
+    const refreshTabBtn = document.getElementById('refreshTabBtn');
+    refreshTabBtn?.addEventListener('click', () => {
+      if (activeTabStatus.tabId != null) {
+        chrome.tabs.reload(activeTabStatus.tabId);
+      }
+    });
+
+    restoreEventsListScroll(eventsList, scrollMode, prevScrollTop, prevScrollHeight);
+    return;
+  }
+  
+  eventsList.innerHTML = events.map(renderEvent).join('');
+  restoreEventsListScroll(eventsList, scrollMode, prevScrollTop, prevScrollHeight);
+  bindEventListHandlers(eventsList);
 }
 
 function showSettings(): void {
