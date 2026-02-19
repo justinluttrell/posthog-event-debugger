@@ -1,6 +1,6 @@
 {
   "name": "posthog-event-debugger",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "type": "module",
   "description": "Unofficial Chrome extension to debug PostHog events",
   "author": "https://github.com/justinluttrell",
