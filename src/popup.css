@@ -21,6 +21,9 @@
     --text-primary: #0F172A;
     --text-secondary: #475569;
     --text-tertiary: #94A3B8;
+
+    --header-control-height: 37px;
+    --mode-toggle-min-width: 40px;
 }
 
 * {
@@ -31,15 +34,30 @@
 
 body {
     width: 752px;
+    height: 600px;
     max-height: 600px;
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
     background: var(--bg-secondary);
 }
 
+body.mode-popup {
+    --header-control-height: 37px;
+    --mode-toggle-min-width: 40px;
+}
+
+body.mode-sidepanel {
+    width: 100%;
+    min-width: 0;
+    height: 100vh;
+    max-height: none;
+    --header-control-height: 34px;
+    --mode-toggle-min-width: 34px;
+}
+
 .container {
     display: flex;
     flex-direction: column;
-    height: 600px;
+    height: 100%;
 }
 
 #mainView, #settingsView {
@@ -79,10 +97,62 @@ body {
     color: var(--text-primary);
 }
 
-.header-actions {
+body.mode-sidepanel .header {
+    padding: 12px;
+    gap: 8px;
+}
+
+body.mode-sidepanel .header h1 {
+    font-size: 16px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
+}
+
+.header-actions,
+.header-buttons {
     display: flex;
     gap: 8px;
     align-items: center;
+}
+
+body.mode-sidepanel .header-buttons {
+    gap: 6px;
+}
+
+.mode-toggle-btn {
+    min-width: var(--mode-toggle-min-width);
+    min-height: var(--header-control-height);
+    padding: 6px 10px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    border: 2px solid var(--text-primary);
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    box-shadow: 3px 3px 0 var(--text-primary);
+}
+
+.mode-toggle-btn:active {
+    transform: translate(3px, 3px);
+    box-shadow: 0 0 0 var(--text-primary);
+}
+
+.mode-toggle-icon {
+    display: inline-flex;
+    width: 18px;
+    height: 18px;
+}
+
+.mode-toggle-icon svg {
+    width: 18px;
+    height: 18px;
+    display: block;
 }
 
 /* Hand-drawn button style */
@@ -97,6 +167,7 @@ body {
     cursor: pointer;
     box-shadow: 3px 3px 0 var(--text-primary);
     position: relative;
+    min-height: var(--header-control-height);
 }
 
 .clear-btn:active, .configure-btn:active, .back-btn:active {

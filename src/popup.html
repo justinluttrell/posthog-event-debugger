@@ -15,6 +15,9 @@
                 <div class="header-buttons">
                     <button id="clearBtn" class="clear-btn">Clear All</button>
                     <button id="configBtn" class="configure-btn" title="Configure filters">Settings</button>
+                    <button id="modeToggleBtn" class="mode-toggle-btn" title="Open in side panel" aria-label="Open in side panel">
+                        <span id="modeToggleIcon" class="mode-toggle-icon" aria-hidden="true"></span>
+                    </button>
                 </div>
             </div>
 
@@ -39,13 +42,16 @@
         <div id="settingsView" style="display: none;">
             <div class="header">
                 <button id="backBtn" class="back-btn">← Back</button>
-                <h1>Filter Events</h1>
+                <h1>Settings</h1>
+                <div class="header-buttons">
+                    <button id="feedbackBtn" class="configure-btn" title="Provide feedback or get help">Feedback</button>
+                </div>
             </div>
 
             <div class="settings-content">
                 <div class="settings-section">
                     <div class="settings-header">
-                        <h3>Event Types</h3>
+                        <h3>Filter Events</h3>
                         <div class="settings-actions">
                             <button id="selectAllBtn" class="action-btn">Select All</button>
                             <button id="deselectAllBtn" class="action-btn">Deselect All</button>

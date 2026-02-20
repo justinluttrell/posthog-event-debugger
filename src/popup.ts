@@ -8,7 +8,27 @@ const expandedJsonValues = new Set<string>();
 let filteredEventTypes = new Set<string>();
 let searchQuery = '';
 let selectedDomain: string | null = null; // null means "all domains"
-let domainAutoSelected = false; // Track if we've auto-selected a domain on initial load
+let domainSelectionPinned = false;
+let currentViewMode: ExtensionViewMode = 'popup';
+
+const VIEW_MODE_STORAGE_KEY = 'extensionViewMode';
+const FEEDBACK_FORM_URL = 'https://docs.google.com/forms/d/e/1FAIpQLScrxH7CmncyQc3slDVRpg1yUcmGPuvsACA00T55cijxQTkC5w/viewform?usp=sharing&ouid=110187965051592055396';
+
+type ExtensionViewMode = 'popup' | 'sidepanel';
+
+const SIDE_PANEL_ICON = `
+<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect x="3" y="4" width="18" height="16" rx="2" stroke="currentColor" stroke-width="2"/>
+  <path d="M14 4V20" stroke="currentColor" stroke-width="2"/>
+</svg>
+`;
+
+const POPUP_ICON = `
+<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect x="4" y="5" width="16" height="14" rx="2" stroke="currentColor" stroke-width="2"/>
+  <path d="M4 9H20" stroke="currentColor" stroke-width="2"/>
+</svg>
+`;
 
 // Storage functions
 async function loadFilteredEventTypes(): Promise<void> {
@@ -28,6 +48,110 @@ async function saveFilteredEventTypes(): Promise<void> {
       resolve();
     });
   });
+}
+
+function normalizeViewMode(value: unknown): ExtensionViewMode {
+  return value === 'sidepanel' ? 'sidepanel' : 'popup';
+}
+
+async function saveViewModeLocally(viewMode: ExtensionViewMode): Promise<void> {
+  return new Promise((resolve) => {
+    chrome.storage.local.set({ [VIEW_MODE_STORAGE_KEY]: viewMode }, () => {
+      resolve();
+    });
+  });
+}
+
+async function loadViewMode(): Promise<ExtensionViewMode> {
+  return new Promise((resolve) => {
+    chrome.storage.local.get([VIEW_MODE_STORAGE_KEY], (result) => {
+      resolve(normalizeViewMode(result[VIEW_MODE_STORAGE_KEY]));
+    });
+  });
+}
+
+async function setViewMode(viewMode: ExtensionViewMode): Promise<void> {
+  await saveViewModeLocally(viewMode);
+  await new Promise<void>((resolve) => {
+    chrome.runtime.sendMessage({ action: 'setViewMode', viewMode }, () => {
+      resolve();
+    });
+  });
+  currentViewMode = viewMode;
+  applyViewModeLayout();
+  renderModeToggleButton();
+}
+
+function applyViewModeLayout(): void {
+  const body = document.body;
+  if (!body) return;
+
+  body.classList.remove('mode-popup', 'mode-sidepanel');
+  body.classList.add(currentViewMode === 'sidepanel' ? 'mode-sidepanel' : 'mode-popup');
+}
+
+function renderModeToggleButton(): void {
+  const modeToggleBtn = document.getElementById('modeToggleBtn') as HTMLButtonElement | null;
+  const modeToggleIcon = document.getElementById('modeToggleIcon');
+  if (!modeToggleBtn || !modeToggleIcon) return;
+
+  const isSidePanelMode = currentViewMode === 'sidepanel';
+  modeToggleBtn.title = isSidePanelMode ? 'Switch to popup mode' : 'Open in side panel';
+  modeToggleBtn.setAttribute('aria-label', modeToggleBtn.title);
+  modeToggleIcon.innerHTML = isSidePanelMode ? POPUP_ICON : SIDE_PANEL_ICON;
+}
+
+async function getCurrentWindowId(): Promise<number | null> {
+  try {
+    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+    const tab = tabs[0];
+    return tab?.windowId ?? null;
+  } catch {
+    return null;
+  }
+}
+
+async function openSidePanelForCurrentWindow(): Promise<void> {
+  const windowId = await getCurrentWindowId();
+  if (windowId == null) {
+    throw new Error('No active window found to open side panel.');
+  }
+
+  await chrome.sidePanel.open({ windowId });
+}
+
+async function openPopupForCurrentWindow(): Promise<void> {
+  const windowId = await getCurrentWindowId();
+  if (windowId == null) {
+    await chrome.action.openPopup();
+    return;
+  }
+
+  await chrome.action.openPopup({ windowId });
+}
+
+async function switchToPopupModeAndOpen(): Promise<void> {
+  const windowId = await getCurrentWindowId();
+
+  await new Promise<void>((resolve, reject) => {
+    chrome.runtime.sendMessage({ action: 'switchToPopupAndOpen', windowId }, (response) => {
+      if (chrome.runtime.lastError) {
+        reject(new Error(chrome.runtime.lastError.message));
+        return;
+      }
+
+      if (!response?.success) {
+        reject(new Error('Background failed to switch to popup mode.'));
+        return;
+      }
+
+      resolve();
+    });
+  });
+
+  currentViewMode = 'popup';
+  applyViewModeLayout();
+  renderModeToggleButton();
 }
 
 async function getEvents(): Promise<PostHogEvent[]> {
@@ -270,7 +394,7 @@ async function getActiveTabCaptureStatus(): Promise<ActiveTabCaptureStatus> {
     if (tab.url) {
       try {
         const urlObj = new URL(tab.url);
-        domain = urlObj.hostname;
+        domain = urlObj.hostname || null;
         isHttpPage = urlObj.protocol === 'http:' || urlObj.protocol === 'https:';
       } catch {
         domain = null;
@@ -297,21 +421,22 @@ async function renderDomainTabs(domains: string[], allEvents: PostHogEvent[], cu
   // Show tabs for multiple domains, or when current tab has no captured events yet.
   if (displayDomains.length <= 1 && !(currentDomain && allEvents.length === 0)) {
     domainTabs.style.display = 'none';
-    selectedDomain = null; // Reset to show all when only one domain
+    if (!domainSelectionPinned) {
+      selectedDomain = currentDomain;
+    }
     return;
   }
-  
+
   domainTabs.style.display = 'flex';
-  
-  // Only auto-select if we haven't done it yet and no domain is explicitly selected
-  // This prevents re-selecting when user clicks "All"
-  if (!domainAutoSelected && selectedDomain === null && displayDomains.length > 0) {
-    if (currentDomain && displayDomains.includes(currentDomain)) {
+
+  if (!domainSelectionPinned) {
+    if (currentDomain) {
       selectedDomain = currentDomain;
-    } else if (displayDomains.length > 0) {
+    } else if (displayDomains.length === 1) {
       selectedDomain = displayDomains[0];
+    } else {
+      selectedDomain = null;
     }
-    domainAutoSelected = true;
   }
   
   // Count events per domain
@@ -341,9 +466,14 @@ async function renderDomainTabs(domains: string[], allEvents: PostHogEvent[], cu
   domainTabs.querySelectorAll('.domain-tab').forEach((tab) => {
     tab.addEventListener('click', async () => {
       const domain = tab.getAttribute('data-domain');
-      selectedDomain = domain === 'all' ? null : domain;
-      domainAutoSelected = true; // Mark as explicitly selected by user
-      
+      if (domain === 'all') {
+        selectedDomain = null;
+        domainSelectionPinned = false;
+      } else {
+        selectedDomain = domain;
+        domainSelectionPinned = true;
+      }
+
       // Re-render events and settings (if settings view is open)
       await renderEvents();
       const settingsView = document.getElementById('settingsView');
@@ -631,6 +761,10 @@ async function renderSettings(): Promise<void> {
 
 // Initialize
 document.addEventListener('DOMContentLoaded', async () => {
+  currentViewMode = await loadViewMode();
+  applyViewModeLayout();
+  renderModeToggleButton();
+
   await loadFilteredEventTypes();
   await renderEvents();
   
@@ -657,6 +791,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     expandedEvents.clear();
     showInternalPropsForEvent.clear();
     selectedDomain = null; // Reset domain selection
+    domainSelectionPinned = false;
     await renderEvents();
   });
   
@@ -664,10 +799,41 @@ document.addEventListener('DOMContentLoaded', async () => {
   configBtn?.addEventListener('click', () => {
     showSettings();
   });
+
+  const modeToggleBtn = document.getElementById('modeToggleBtn');
+  modeToggleBtn?.addEventListener('click', async () => {
+    if (currentViewMode === 'popup') {
+      await setViewMode('sidepanel');
+      try {
+        await openSidePanelForCurrentWindow();
+      } catch (error) {
+        console.error('[PostHog Debugger] Failed to open side panel:', error);
+      }
+      window.close();
+      return;
+    }
+
+    try {
+      await switchToPopupModeAndOpen();
+    } catch (error) {
+      console.error('[PostHog Debugger] Failed to switch to popup mode:', error);
+      try {
+        await openPopupForCurrentWindow();
+      } catch (openError) {
+        console.error('[PostHog Debugger] Failed to open popup:', openError);
+      }
+      await setViewMode('popup');
+    }
+  });
   
   const backBtn = document.getElementById('backBtn');
   backBtn?.addEventListener('click', () => {
     showMain();
+  });
+
+  const feedbackBtn = document.getElementById('feedbackBtn');
+  feedbackBtn?.addEventListener('click', () => {
+    chrome.tabs.create({ url: FEEDBACK_FORM_URL });
   });
 
   const selectAllBtn = document.getElementById('selectAllBtn');

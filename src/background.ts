@@ -2,6 +2,9 @@ import type { PostHogEvent, GetEventsResponse, ClearEventsResponse } from './typ
 import * as pako from 'pako';
 
 const EVENTS_STORAGE_KEY = 'capturedEvents';
+const VIEW_MODE_STORAGE_KEY = 'extensionViewMode';
+
+type ExtensionViewMode = 'popup' | 'sidepanel';
 
 const MAX_STORED_SIZE_BYTES = 8 * 1024 * 1024; // 8 MiB
 const CLEANUP_SIZE_BYTES = 2 * 1024 * 1024; // Prune 2 MiB when over budget
@@ -60,6 +63,35 @@ function setStorage(data: Record<string, unknown>): Promise<void> {
       resolve();
     });
   });
+}
+
+function readExtensionViewMode(value: unknown): ExtensionViewMode {
+  return value === 'sidepanel' ? 'sidepanel' : 'popup';
+}
+
+async function getStoredViewMode(): Promise<ExtensionViewMode> {
+  const result = await getStorage<Record<string, unknown>>([VIEW_MODE_STORAGE_KEY]);
+  return readExtensionViewMode(result[VIEW_MODE_STORAGE_KEY]);
+}
+
+async function applySidePanelBehavior(viewMode: ExtensionViewMode): Promise<void> {
+  await chrome.sidePanel.setOptions({
+    path: 'popup.html',
+    enabled: viewMode === 'sidepanel'
+  });
+
+  await chrome.sidePanel.setPanelBehavior({
+    openPanelOnActionClick: viewMode === 'sidepanel'
+  });
+}
+
+async function syncSidePanelBehaviorFromStorage(): Promise<void> {
+  try {
+    const viewMode = await getStoredViewMode();
+    await applySidePanelBehavior(viewMode);
+  } catch (error) {
+    console.error('[PostHog Debugger] Failed to sync side panel behavior:', error);
+  }
 }
 
 async function persistEventsWithTrim(): Promise<void> {
@@ -130,6 +162,49 @@ function decodePostHogEvent(rawData: Uint8Array) {
 }
 
 chrome.runtime.onMessage.addListener((request: any, sender, sendResponse) => {
+  if (request.action === 'getViewMode') {
+    getStoredViewMode()
+      .then((viewMode) => {
+        sendResponse({ viewMode });
+      })
+      .catch((error) => {
+        console.error('[PostHog Debugger] Failed to read view mode:', error);
+        sendResponse({ viewMode: 'popup' as ExtensionViewMode });
+      });
+    return true;
+  }
+
+  if (request.action === 'setViewMode') {
+    const viewMode = readExtensionViewMode(request.viewMode);
+    setStorage({ [VIEW_MODE_STORAGE_KEY]: viewMode })
+      .then(() => applySidePanelBehavior(viewMode))
+      .then(() => {
+        sendResponse({ success: true });
+      })
+      .catch((error) => {
+        console.error('[PostHog Debugger] Failed to update view mode:', error);
+        sendResponse({ success: false });
+      });
+    return true;
+  }
+
+  if (request.action === 'switchToPopupAndOpen') {
+    const requestedWindowId = typeof request.windowId === 'number' ? request.windowId : undefined;
+    const windowId = requestedWindowId ?? sender.tab?.windowId;
+
+    setStorage({ [VIEW_MODE_STORAGE_KEY]: 'popup' })
+      .then(() => applySidePanelBehavior('popup'))
+      .then(() => chrome.action.openPopup(windowId != null ? { windowId } : undefined))
+      .then(() => {
+        sendResponse({ success: true });
+      })
+      .catch((error) => {
+        console.error('[PostHog Debugger] Failed to switch to popup mode and open popup:', error);
+        sendResponse({ success: false });
+      });
+    return true;
+  }
+
   if (request.action === 'getEvents') {
     ensureEventsLoaded()
       .then(() => {
@@ -225,3 +300,13 @@ chrome.runtime.onMessage.addListener((request: any, sender, sendResponse) => {
 
   return false;
 });
+
+chrome.runtime.onInstalled.addListener(() => {
+  syncSidePanelBehaviorFromStorage();
+});
+
+chrome.runtime.onStartup.addListener(() => {
+  syncSidePanelBehaviorFromStorage();
+});
+
+syncSidePanelBehaviorFromStorage();
